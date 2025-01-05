@@ -5,8 +5,7 @@ from openai import OpenAI
 
 def get_gpt_command(inp):
     # Set your API key
-    key = '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'
-
+    key = ""
     client = OpenAI(
         api_key=key,  # This is the default and can be omitted
     )
