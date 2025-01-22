@@ -1,19 +1,19 @@
 from ultralytics import YOLO
 import cv2
 from text2command import get_gpt_command
+from Ask_yolo import asking_yolo
 
 # Load a model
-model = YOLO("yolo11n.pt")
-
-# Perform object detection on an image
-# results = model(r"C:\Users\zaita\Downloads\WDW-DS-Marketplace-Co-Op-Pastel-Stoney-Clover-Lane-Disney-Parks-Collection-Release-Crowds.jpg")
-# results[0].show()
+model = YOLO("yolo11s.pt")
 
 # Open the default camera (0 for the first camera, 1 for the second, etc.)
 cap = cv2.VideoCapture(0)
 
+chosen_class = "person"
 
-chosen_class = ""
+target_found = False
+padding = 30
+cam_width, cam_height = 640, 480
 
 if not cap.isOpened():
     print("Error: Could not open the camera.")
@@ -22,35 +22,22 @@ if not cap.isOpened():
 while True:
     # Capture frame-by-frame
     ret, frame = cap.read()
+    height, width, channels = frame.shape
 
     if not ret:
         print("Error: Failed to capture frame.")
         break
 
-    # Perform object detection on the current frame
-    results = model(frame)
-
-    # Flag to check if a target class is detected
-    target_found = False
-
-    for result in results:  # Iterate over results
-        for box in result.boxes.data:  # Iterate over detected boxes
-            # Extract bounding box information
-            x1, y1, x2, y2, conf, cls = box.cpu().numpy()  # Convert to NumPy array
-
-            # Check if the detected class matches the target class
-            if result.names[int(cls)] == chosen_class:
-                # Ensure bounding box coordinates are within frame dimensions
-                x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
-
-                # Crop the frame based on the bounding box
-                cropped = frame[y1:y2, x1:x2]
-
-                # Display the cropped image
-                cv2.imshow("Full Frame", cropped)
-                target_found = True
+    if target_found:
+        target_found = False
+        results, x1, y1, x2, y2, target_found = asking_yolo(model, frame[max(0, y1 - padding): min(frame.shape[0], y2 + padding),
+                                                          max(0, x1 - padding):min(frame.shape[1], x2 + padding)],
+                                                   chosen_class)
+    if not target_found:
+        target_found = False
+        results, x1, y1, x2, y2, target_found = asking_yolo(model,
+                                                     frame,
+                                                     chosen_class)
 
     if not target_found:
         # Display the full annotated frame if no target class is found
