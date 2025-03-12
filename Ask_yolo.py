@@ -1,10 +1,10 @@
 import cv2
+from Cropped2center import cropped2center
 
+cam_width, cam_height = 1000, 1000
+STRIDE = 5
 
-cam_width, cam_height = 640, 480
-
-
-def asking_yolo(model, frame, chosen_class):
+def asking_yolo(model, frame, chosen_class, past_coor, frame_num):
     target_found = False
     height, width, channels = frame.shape
     results = model(frame, imgsz=max(height, width))
@@ -22,17 +22,7 @@ def asking_yolo(model, frame, chosen_class):
 
                 # Crop the frame based on the bounding box
                 cropped = frame[y1:y2, x1:x2]
-                height, width, channels = cropped.shape
-                if height < cam_height or width < cam_width:
-                    # Calculate padding
-                    top = (cam_height - height) // 2
-                    bottom = cam_height - height - top
-                    left = (cam_width - width) // 2
-                    right = cam_width - width - left
-                    # Add padding
-                    cropped = cv2.copyMakeBorder(cropped, top, bottom, left, right, cv2.BORDER_CONSTANT, value=[0, 0, 0])
-                # Display the cropped image
-                cv2.imshow("Full Frame", cropped)
+                cv2.imshow("Full Frame", cropped2center(cropped))
 
                 target_found = True
                 return results, x1, y1, x2, y2, target_found
