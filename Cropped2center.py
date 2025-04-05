@@ -1,7 +1,6 @@
 import cv2
-cam_width = 1000
-cam_height = 1000
-
+cam_width = 1388
+cam_height = 1038
 def cropped2center(cropped):
     height, width, channels = cropped.shape
     if height < cam_height or width < cam_width:
