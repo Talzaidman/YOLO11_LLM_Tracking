@@ -20,12 +20,11 @@ def cropped2sameplace(full_image, cropped, dx, dy):
     if cropped is None:
         print("Error: Input cropped image is None.")
         return None
-
-    full_height, full_width = target_height,target_width
     cropped_height, cropped_width = cropped.shape[:2]
-
     cropped_roi = cropped
-
+    if dx < 0 or dy < 0 or dx + cropped_width > full_image.shape[1] or dy + cropped_height > full_image.shape[0]:
+        print("Error: Cropped image exceeds the boundaries of the full image.")
+        return full_image
     full_image[dy:dy+cropped_height, dx:dx + cropped_width] = cropped_roi
 
     return full_image
