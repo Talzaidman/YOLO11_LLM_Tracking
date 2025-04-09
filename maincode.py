@@ -8,6 +8,9 @@ import numpy as np
 from vimba import *
 from Cropped2center import cropped2center
 from Cropped2sameplace import cropped2sameplace
+import os
+import threading
+import queue
 
 
 model = YOLOWorld("yolov8s-worldv2.pt")
@@ -33,11 +36,6 @@ old_frame_time = 0
 old_frame_time_plot = 0
 past_frame = None
 full_image = None
-
-import os
-import threading
-import queue
-import time
 
 # Add these at the beginning of your script
 save_frames = True  # Flag to enable/disable frame saving
