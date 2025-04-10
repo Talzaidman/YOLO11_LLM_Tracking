@@ -20,9 +20,9 @@ YOLO_STRIDE = 30
 CHANGE_ROI_THRESH = 8
 LIVE_STREAM_FPS = 25
 target_found = False
-edge_proximity_yolo_margin = 30
+edge_proximity_yolo_margin = 10
 near_edge = True
-padding = 50
+padding = 25
 fps_ls = []
 x1, y1, x2, y2 = 0, 0, 0, 0
 x1_ROI, y1_ROI, x2_ROI, y2_ROI = 0, 0, cam_width, cam_height
@@ -38,7 +38,7 @@ past_frame = None
 full_image = None
 
 # Add these at the beginning of your script
-save_frames = True  # Flag to enable/disable frame saving
+save_frames = False  # Flag to enable/disable frame saving
 save_directory = "saved_frames"  # Directory to save frames
 frame_save_interval = 5  # Save every Nth frame
 frame_number = 0  # Counter for naming frames
@@ -97,7 +97,7 @@ def frame_handler(camera, frame):
 
     new_frame_time = time.time()
 
-    if new_frame_time - old_frame_time > 0.012:
+    if new_frame_time - old_frame_time > 0.0125:
 
         execution_time = 1 / (new_frame_time - old_frame_time)
         if frame_count % YOLO_STRIDE != 1:
@@ -106,13 +106,19 @@ def frame_handler(camera, frame):
 
         numpy_array = frame.as_numpy_ndarray()
         frame = cv2.cvtColor(numpy_array, cv2.COLOR_BayerRG2BGR)
-        cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+
         if x1_ROI == 0 and y1_ROI == 0 and x2_ROI == cam_width and y2_ROI == cam_height:
             full_image = frame
-        if full_image is None:
-            frame2show = cropped2center(frame)
-        else:
-            frame2show = cropped2sameplace(full_image.copy(), frame, int(delta_x1), int(delta_y1))
+
+        if new_frame_time - old_frame_time_plot > 0.0333:
+            cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+            if full_image is None:
+                frame2show = cropped2center(frame)
+            else:
+                frame2show = cropped2sameplace(full_image, frame, int(delta_x1), int(delta_y1))
+            frame_small = cv2.resize(frame2show, (frame2show.shape[1] // 2, frame2show.shape[0] // 2))
+            cv2.imshow("Full Frame", frame_small)
+            old_frame_time_plot = new_frame_time
 
         if save_frames and frame_count % frame_save_interval == 0:
             # Make a copy of the frame to avoid modifying it while it's in the queue
@@ -124,13 +130,6 @@ def frame_handler(camera, frame):
             except queue.Full:
                 # Queue is full, skip this frame
                 print("Warning: Frame saving queue is full, skipping frame")
-
-
-        frame_small = cv2.resize(frame2show, (frame2show.shape[1] // 2, frame2show.shape[0] // 2))
-
-        if new_frame_time - old_frame_time_plot > 0.0333:
-            cv2.imshow("Full Frame", frame_small)
-            old_frame_time_plot = new_frame_time
 
         frame_count+=1
         if frame_count > 20000:
@@ -186,7 +185,7 @@ def frame_handler(camera, frame):
 
         saving_thread_active = False
         save_thread.join(timeout=5.0)
-        fps_ls = np.convolve(fps_ls, np.ones(50) / 50, mode='valid')
+        #fps_ls = np.convolve(fps_ls, np.ones(20) / 20, mode='valid')
         # Create the plot
         plt.plot(list(range(len(fps_ls[5:]))), fps_ls[5:], label="fps", color="blue", linestyle="-", linewidth=2)
 
@@ -212,6 +211,9 @@ def frame_handler(camera, frame):
         cam.get_feature_by_name("GainRaw").set(20)
         #cam.get_feature_by_name("GainAuto").set("Once")
         cam.get_feature_by_name("BalanceWhiteAuto").set("Once")
+    elif key == ord('s'):  # Toggle frame saving when 's' is pressed
+        save_frames = not save_frames
+        print(f"Frame saving {'enabled' if save_frames else 'disabled'}")
 
 
 
