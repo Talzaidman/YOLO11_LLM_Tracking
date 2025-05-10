@@ -167,7 +167,7 @@ FIXED_ROI_HEIGHT = 140
 
 # Create global variables for shared state
 model = YOLOWorld("yolov8s-worldv2.pt")
-chosen_class = "person"
+chosen_class = "propeller"
 model.set_classes([chosen_class])
 tracker = ObjectTracker()  # Initialize Kalman tracker
 
@@ -209,6 +209,13 @@ frame_number = 0
 
 # Maximum number of saved frames to keep
 MAX_SAVED_FRAMES = 1000
+
+UPDATE_BACKGROUND_EVERY = 20  # Update background every 100 frames
+UPDATE_BACKGROUND_FOR = 3  # Update background for UPDATE_BACKGROUND_FOR frames
+UPDATE_BACKGROUND_COUNTER = UPDATE_BACKGROUND_FOR  # Update background for UPDATE_BACKGROUND_FOR frames
+UPDATE_BACKGROUND = True  # Flag to control background update
+roi_state = {}
+UPDATING_BACKGROUND = False  # Flag while update full roi
 
 def cleanup_old_frames():
     """Clean up old frames if we exceed the maximum limit."""
@@ -428,7 +435,7 @@ def frame_saving_thread():
 # Camera frame handler - keeps processing minimal
 def frame_handler(camera, frame):
     global old_frame_time, fps_ls, frame_count, full_image, x1_ROI, y1_ROI, x2_ROI_width, y2_ROI_height, \
-        delta_x1, delta_y1, frame_number, save_frames, near_edge, ROI_counter, cam, tracker, roi_fixed
+        delta_x1, delta_y1, frame_number, save_frames, near_edge, ROI_counter, cam, tracker, roi_fixed, roi_state, UPDATING_BACKGROUND, UPDATE_BACKGROUND_COUNTER,UPDATE_BACKGROUND
 
     # Queue the frame immediately
     camera.queue_frame(frame)
@@ -437,8 +444,9 @@ def frame_handler(camera, frame):
     new_frame_time = time.time()
     current_fps = 0
     if old_frame_time > 0:  # Skip first frame
-        current_fps = 1 / (new_frame_time - old_frame_time)
-        fps_ls.append(current_fps)
+        if new_frame_time - old_frame_time > 0:
+            current_fps = 1 / (new_frame_time - old_frame_time)
+            fps_ls.append(current_fps)
         # Keep only last 1000 FPS measurements
         if len(fps_ls) > 1000:
             fps_ls = fps_ls[-1000:]
@@ -464,18 +472,53 @@ def frame_handler(camera, frame):
         frame_count += 1
 
         # Store full image for reference
-        if x1_ROI == 0 and y1_ROI == 0 and x2_ROI_width == cam_width and y2_ROI_height == cam_height:
+        if current_frame.shape == (cam_height, cam_width, 3):
             full_image = current_frame.copy()
+
+        if UPDATING_BACKGROUND:
+            # Update the background image
+            UPDATE_BACKGROUND_COUNTER -= 1
+            if UPDATE_BACKGROUND_COUNTER <= 0:
+                # Reset background update flag
+                UPDATE_BACKGROUND_COUNTER = UPDATE_BACKGROUND_FOR
+                try:
+                    cam.get_feature_by_name("Height").set(roi_state["y2_ROI_height"])
+                    cam.get_feature_by_name("Width").set(roi_state["x2_ROI_width"])
+                    cam.get_feature_by_name("OffsetY").set(roi_state["y1_ROI"])
+                    cam.get_feature_by_name("OffsetX").set(roi_state["x1_ROI"])
+                    delta_x1 = roi_state["delta_x1"]
+                    delta_y1 = roi_state["delta_y1"]
+                    UPDATING_BACKGROUND = False
+                    print(f"returned background to ROI: {roi_state}")
+                except Exception as e:
+                    print(f"Error updating background: {e}")
+
+        if not (current_frame.shape == (cam_height, cam_width, 3)) and frame_count % UPDATE_BACKGROUND_EVERY == 0 and UPDATE_BACKGROUND and not UPDATING_BACKGROUND:
+            print("Updating background")
+            roi_state = {"x1_ROI": FIXED_ROI_X, "y1_ROI": FIXED_ROI_Y, "x2_ROI_width": FIXED_ROI_WIDTH, "y2_ROI_height": FIXED_ROI_HEIGHT, "delta_x1": delta_x1, "delta_y1": delta_y1}
+            cam.get_feature_by_name("Height").set(cam_height)
+            cam.get_feature_by_name("Width").set(cam_width)
+            cam.get_feature_by_name("OffsetY").set(0)
+            cam.get_feature_by_name("OffsetX").set(0)
+            delta_x1 = 0
+            delta_y1 = 0
+            x1_ROI, y1_ROI, x2_ROI_width, y2_ROI_height = 0, 0, cam_width, cam_height
+
+            UPDATING_BACKGROUND = True
+
 
         # Add to display queue (non-blocking)
         try:
-            if display_queue.qsize() < display_queue.maxsize:
-                display_queue.put_nowait((current_frame.copy(), delta_x1, delta_y1))
+            if display_queue.qsize() < display_queue.maxsize and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [5,4] :
+                if current_frame.shape == (cam_height, cam_width, 3):
+                    display_queue.put_nowait((current_frame.copy(), 0, 0))
+                else:
+                    display_queue.put_nowait((current_frame.copy(), delta_x1, delta_y1))
         except queue.Full:
             pass  # Skip frame if queue is full
 
         # Add to YOLO queue on interval (replace any existing frame)
-        if frame_count % YOLO_STRIDE == 0:
+        if frame_count % YOLO_STRIDE == 0 and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [5,4]:
             try:
                 # Clear queue first
                 while not yolo_queue.empty():
@@ -487,7 +530,7 @@ def frame_handler(camera, frame):
                 pass
 
         # Save frames if enabled
-        if save_frames:  # Save every frame
+        if save_frames and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [5,4]:  # Save every frame
             try:
                 # Format FPS to 2 decimal places
                 fps_str = f"{current_fps:.2f}"
@@ -497,7 +540,7 @@ def frame_handler(camera, frame):
                 pass  # Skip if queue is full
 
         # Process ROI updates based on detections (only occasionally)
-        if frame_count % YOLO_STRIDE == 0:
+        if frame_count % YOLO_STRIDE == 0 and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [5,4]:
             ROI_counter += 1
 
             # Get detection results
