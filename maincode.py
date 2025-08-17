@@ -12,164 +12,30 @@ import os
 import threading
 import queue
 from ultralytics.utils import LOGGER
-from filterpy.kalman import KalmanFilter  # New import for Kalman filtering
 
 # Turn off Ultralytics logging
 LOGGER.setLevel(40)  # 40 = ERROR, suppresses INFO and WARNING
 
-# Kalman Filter implementation for object tracking
-class ObjectTracker:
-    def __init__(self):
-        # State: [x, y, width, height, vx, vy, vw, vh]
-        # We track position, size and their velocities
-        self.kf = KalmanFilter(dim_x=8, dim_z=4)
-        
-        # State transition matrix (motion model)
-        self.kf.F = np.array([
-            [1, 0, 0, 0, 1, 0, 0, 0],  # x = x + vx
-            [0, 1, 0, 0, 0, 1, 0, 0],  # y = y + vy
-            [0, 0, 1, 0, 0, 0, 1, 0],  # w = w + vw
-            [0, 0, 0, 1, 0, 0, 0, 1],  # h = h + vh
-            [0, 0, 0, 0, 1, 0, 0, 0],  # vx = vx
-            [0, 0, 0, 0, 0, 1, 0, 0],  # vy = vy
-            [0, 0, 0, 0, 0, 0, 1, 0],  # vw = vw
-            [0, 0, 0, 0, 0, 0, 0, 1],  # vh = vh
-        ])
-        
-        # Measurement matrix (maps state to measurement)
-        self.kf.H = np.array([
-            [1, 0, 0, 0, 0, 0, 0, 0],  # x
-            [0, 1, 0, 0, 0, 0, 0, 0],  # y
-            [0, 0, 1, 0, 0, 0, 0, 0],  # width
-            [0, 0, 0, 1, 0, 0, 0, 0],  # height
-        ])
-        
-        # Initialize state covariance matrix with high uncertainty
-        self.kf.P = np.eye(8) * 1000
-        
-        # Process noise - how much randomness in motion model
-        # Increase uncertainty for velocity components
-        self.kf.Q = np.eye(8) * 0.1
-        self.kf.Q[4:, 4:] *= 10  # More uncertainty in velocity
-        
-        # Measurement noise - how noisy are our detections
-        # Increase measurement noise to trust predictions more when detections are uncertain
-        self.kf.R = np.eye(4) * 10
-        
-        # Initial state
-        self.kf.x = np.zeros((8, 1))
-        
-        # Track initialized state
-        self.initialized = False
-        self.frames_since_detection = 0
-        self.max_prediction_frames = 30  # Maximum frames to predict without detection
-        
-        # Smoothing parameters
-        self.alpha = 0.7  # Smoothing factor for position updates
-        self.last_bbox = None  # Store last valid bbox for smoothing
-        
-    def init(self, bbox):
-        """Initialize tracker with first detection [x1, y1, x2, y2]"""
-        x, y = bbox[0], bbox[1]
-        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        
-        # Initialize state [x, y, w, h, vx, vy, vw, vh]
-        self.kf.x = np.array([[x], [y], [w], [h], [0], [0], [0], [0]])
-        self.initialized = True
-        self.frames_since_detection = 0
-        self.last_bbox = bbox
-        
-    def predict(self):
-        """Predict next state"""
-        if not self.initialized:
-            return None
-            
-        self.kf.predict()
-        self.frames_since_detection += 1
-        
-        # Extract predicted bbox
-        x, y = self.kf.x[0, 0], self.kf.x[1, 0]
-        w, h = self.kf.x[2, 0], self.kf.x[3, 0]
-        vx, vy = self.kf.x[4, 0], self.kf.x[5, 0]
-        
-        # Convert to bbox format [x1, y1, x2, y2]
-        x1, y1 = x, y
-        x2, y2 = x + w, y + h
-        
-        return [x1, y1, x2, y2, vx, vy]
-        
-    def update(self, bbox):
-        """Update with new measurement [x1, y1, x2, y2]"""
-        if bbox is None:
-            # No detection, just maintain prediction
-            return
-            
-        # Apply smoothing if we have a previous bbox
-        if self.last_bbox is not None:
-            # Smooth position and size
-            bbox = [
-                self.alpha * bbox[0] + (1 - self.alpha) * self.last_bbox[0],
-                self.alpha * bbox[1] + (1 - self.alpha) * self.last_bbox[1],
-                self.alpha * bbox[2] + (1 - self.alpha) * self.last_bbox[2],
-                self.alpha * bbox[3] + (1 - self.alpha) * self.last_bbox[3]
-            ]
-        
-        x, y = bbox[0], bbox[1]
-        w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        
-        # Initialize if not already done
-        if not self.initialized:
-            self.init(bbox)
-            return
-            
-        # Create measurement
-        z = np.array([[x], [y], [w], [h]])
-        
-        # Update Kalman filter
-        self.kf.update(z)
-        self.frames_since_detection = 0
-        self.last_bbox = bbox
-        
-    def is_valid(self):
-        """Check if tracker is still valid based on time since last detection"""
-        return self.initialized and self.frames_since_detection < self.max_prediction_frames
-        
-    def copy(self):
-        """Create a deep copy of this tracker"""
-        new_tracker = ObjectTracker()
-        new_tracker.kf.x = self.kf.x.copy()
-        new_tracker.kf.P = self.kf.P.copy()
-        new_tracker.initialized = self.initialized
-        new_tracker.frames_since_detection = self.frames_since_detection
-        return new_tracker
-
 # Configuration parameters
 cam_width = 1388
 cam_height = 1038
-YOLO_STRIDE = 20
-CHANGE_ROI_THRESH = 8
+YOLO_STRIDE = 5 
+CHANGE_ROI_THRESH = 5 
 DISPLAY_FPS = 30  # Target display refresh rate
-TARGET_DETECTION_FPS = 15  # Target detection refresh rate
-padding = 50
+TARGET_DETECTION_FPS = 1000  # skip too fast drames faster then 1/1000 
+padding = 80
 edge_proximity_yolo_margin = 10
 
-# Kalman filter parameters
-prediction_horizon = 5  # Look ahead this many frames for ROI adjustment
-enable_predictive_roi = True  # Flag to enable/disable predictive ROI
-velocity_threshold = 2.0  # Minimum velocity to consider for prediction
-direction_weight = 0.3  # How much to weight future direction vs current position
-
 # Fixed ROI parameters for 'j' key
-FIXED_ROI_X = 840
-FIXED_ROI_Y = 712
-FIXED_ROI_WIDTH = 140
-FIXED_ROI_HEIGHT = 140
+FIXED_ROI_X = 558
+FIXED_ROI_Y = 398
+FIXED_ROI_WIDTH = 90
+FIXED_ROI_HEIGHT = 90
 
 # Create global variables for shared state
 model = YOLOWorld("yolov8s-worldv2.pt")
-chosen_class = "propeller"
+chosen_class = "dog"
 model.set_classes([chosen_class])
-tracker = ObjectTracker()  # Initialize Kalman tracker
 
 # Frame and ROI tracking
 target_found = False
@@ -190,7 +56,7 @@ saving_thread_active = True
 roi_fixed = False  # New flag to control ROI behavior
 
 # Create queues for thread communication
-display_queue = queue.Queue(maxsize=2)  # Small queue for display frames
+display_queue = queue.Queue(maxsize=10)  # Small queue for display frames
 yolo_queue = queue.Queue(maxsize=1)  # Only process the latest frame
 frame_queue = queue.Queue(maxsize=20)  # Queue for saving frames
 
@@ -210,7 +76,7 @@ frame_number = 0
 # Maximum number of saved frames to keep
 MAX_SAVED_FRAMES = 1000
 
-UPDATE_BACKGROUND_EVERY = 20  # Update background every 100 frames
+UPDATE_BACKGROUND_EVERY = 60  # Update background every 100 frames
 UPDATE_BACKGROUND_FOR = 3  # Update background for UPDATE_BACKGROUND_FOR frames
 UPDATE_BACKGROUND_COUNTER = UPDATE_BACKGROUND_FOR  # Update background for UPDATE_BACKGROUND_FOR frames
 UPDATE_BACKGROUND = True  # Flag to control background update
@@ -237,7 +103,7 @@ def yolo_detection_thread():
     while loop_cond:
         try:
             # Get latest frame with a timeout
-            frame = yolo_queue.get(timeout=0.5)
+            frame = yolo_queue.get(timeout=0.3)
 
             # Skip some frames if we're falling behind
             frame_skips += 1
@@ -304,31 +170,16 @@ def display_thread():
                     if target_found:
                         cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
 
-                    # Draw Kalman prediction if available
-                    if target_found and tracker.is_valid():
-                        prediction = tracker.predict()
-                        if prediction:
-                            pred_x1, pred_y1, pred_x2, pred_y2, vx, vy = prediction
-                            # Draw predicted bounding box with a different color
-                            cv2.rectangle(frame, (int(pred_x1), int(pred_y1)), (int(pred_x2), int(pred_y2)), 
-                                         (0, 255, 255), 1)  # Yellow for prediction
-                            
-                            # Draw velocity vector
-                            center_x = int((pred_x1 + pred_x2) / 2)
-                            center_y = int((pred_y1 + pred_y2) / 2)
-                            end_x = int(center_x + vx * 10)  # Scale for visibility
-                            end_y = int(center_y + vy * 10)
-                            cv2.arrowedLine(frame, (center_x, center_y), (end_x, end_y), (0, 165, 255), 2)
-
-                    # Draw ROI rectangle
-                    cv2.rectangle(frame, (int(x1_ROI), int(y1_ROI)),
-                                  (int(x1_ROI + x2_ROI_width), int(y1_ROI + y2_ROI_height)),
-                                  (0, 0, 255), 1)
-
                     # Process for display
                     if full_image is None:
                         frame2show = frame.copy()
                     else:
+                        # Skip displaying cropped ROI if delta_x1 and delta_y1 are both zero (should not happen)
+                        if (int(delta_x) == 0 and int(delta_y) == 0 
+                            and (x1_ROI != 0 or y1_ROI != 0 or x2_ROI_width != cam_width or y2_ROI_height != cam_height)):
+                            print("[Warning] Cropped ROI frame with zero delta_x1/delta_y1 detected. Skipping display of this frame.")
+                            display_queue.task_done()
+                            continue
                         try:
                             frame2show = cropped2sameplace(full_image, frame, int(delta_x), int(delta_y))
                         except Exception as e:
@@ -345,22 +196,10 @@ def display_thread():
                         loop_cond = False
                     elif key == ord('j'):
                         # Set ROI to fixed place and prevent auto-reset
-                        try:
-                            cam.get_feature_by_name("Height").set(FIXED_ROI_HEIGHT)
-                            cam.get_feature_by_name("Width").set(FIXED_ROI_WIDTH)
-                            cam.get_feature_by_name("OffsetY").set(FIXED_ROI_Y)
-                            cam.get_feature_by_name("OffsetX").set(FIXED_ROI_X)
-                            x1_ROI = FIXED_ROI_X
-                            y1_ROI = FIXED_ROI_Y
-                            x2_ROI_width = FIXED_ROI_WIDTH
-                            y2_ROI_height = FIXED_ROI_HEIGHT
-                            delta_x1 = FIXED_ROI_X
-                            delta_y1 = FIXED_ROI_Y
-                            roi_fixed = True  # Set the flag to prevent auto-reset
-                            print(f"Set ROI to fixed place: {FIXED_ROI_X},{FIXED_ROI_Y},{FIXED_ROI_WIDTH},{FIXED_ROI_HEIGHT}")
-                            print("ROI auto-reset disabled. Press 'p' to re-enable.")
-                        except Exception as e:
-                            print(f"Error setting fixed ROI: {e}")
+                        cam.get_feature_by_name("BalanceWhiteAuto").set("Once")
+                        cam.get_feature_by_name("ExposureTimeAbs").set(15656)  # 1ms exposure
+                        cam.get_feature_by_name("GainRaw").set(20)  # Compensate with gain
+
                     elif key == ord('p'):
                         # Re-enable ROI auto-reset
                         roi_fixed = False
@@ -435,7 +274,7 @@ def frame_saving_thread():
 # Camera frame handler - keeps processing minimal
 def frame_handler(camera, frame):
     global old_frame_time, fps_ls, frame_count, full_image, x1_ROI, y1_ROI, x2_ROI_width, y2_ROI_height, \
-        delta_x1, delta_y1, frame_number, save_frames, near_edge, ROI_counter, cam, tracker, roi_fixed, roi_state, UPDATING_BACKGROUND, UPDATE_BACKGROUND_COUNTER,UPDATE_BACKGROUND
+        delta_x1, delta_y1, frame_number, save_frames, near_edge, ROI_counter, cam, roi_fixed, roi_state, UPDATING_BACKGROUND, UPDATE_BACKGROUND_COUNTER,UPDATE_BACKGROUND
 
     # Queue the frame immediately
     camera.queue_frame(frame)
@@ -482,12 +321,13 @@ def frame_handler(camera, frame):
                 # Reset background update flag
                 UPDATE_BACKGROUND_COUNTER = UPDATE_BACKGROUND_FOR
                 try:
-                    cam.get_feature_by_name("Height").set(roi_state["y2_ROI_height"])
-                    cam.get_feature_by_name("Width").set(roi_state["x2_ROI_width"])
-                    cam.get_feature_by_name("OffsetY").set(roi_state["y1_ROI"])
-                    cam.get_feature_by_name("OffsetX").set(roi_state["x1_ROI"])
+                    cam.get_feature_by_name("Height").set(roi_state["Height"])
+                    cam.get_feature_by_name("Width").set(roi_state["Width"])
+                    cam.get_feature_by_name("OffsetY").set(roi_state["OffsetY"])
+                    cam.get_feature_by_name("OffsetX").set(roi_state["OffsetX"])
                     delta_x1 = roi_state["delta_x1"]
                     delta_y1 = roi_state["delta_y1"]
+                    x1_ROI, y1_ROI, x2_ROI_width, y2_ROI_height = roi_state["OffsetX"], roi_state["OffsetY"], roi_state["Width"], roi_state["Height"]
                     UPDATING_BACKGROUND = False
                     print(f"returned background to ROI: {roi_state}")
                 except Exception as e:
@@ -495,7 +335,7 @@ def frame_handler(camera, frame):
 
         if not (current_frame.shape == (cam_height, cam_width, 3)) and frame_count % UPDATE_BACKGROUND_EVERY == 0 and UPDATE_BACKGROUND and not UPDATING_BACKGROUND:
             print("Updating background")
-            roi_state = {"x1_ROI": FIXED_ROI_X, "y1_ROI": FIXED_ROI_Y, "x2_ROI_width": FIXED_ROI_WIDTH, "y2_ROI_height": FIXED_ROI_HEIGHT, "delta_x1": delta_x1, "delta_y1": delta_y1}
+            roi_state = {"OffsetX": x1_ROI, "OffsetY": y1_ROI, "Width": x2_ROI_width, "Height": y2_ROI_height, "delta_x1": delta_x1, "delta_y1": delta_y1}
             cam.get_feature_by_name("Height").set(cam_height)
             cam.get_feature_by_name("Width").set(cam_width)
             cam.get_feature_by_name("OffsetY").set(0)
@@ -506,10 +346,9 @@ def frame_handler(camera, frame):
 
             UPDATING_BACKGROUND = True
 
-
         # Add to display queue (non-blocking)
         try:
-            if display_queue.qsize() < display_queue.maxsize and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [5,4] :
+            if display_queue.qsize() < display_queue.maxsize and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [4,5,6,7,8] :
                 if current_frame.shape == (cam_height, cam_width, 3):
                     display_queue.put_nowait((current_frame.copy(), 0, 0))
                 else:
@@ -518,7 +357,7 @@ def frame_handler(camera, frame):
             pass  # Skip frame if queue is full
 
         # Add to YOLO queue on interval (replace any existing frame)
-        if frame_count % YOLO_STRIDE == 0 and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [5,4]:
+        if frame_count % YOLO_STRIDE == 0 and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [4,5,6,7,8]:
             try:
                 # Clear queue first
                 while not yolo_queue.empty():
@@ -530,7 +369,7 @@ def frame_handler(camera, frame):
                 pass
 
         # Save frames if enabled
-        if save_frames and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [5,4]:  # Save every frame
+        if save_frames and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [4,5,6,7,8]:  # Save every frame
             try:
                 # Format FPS to 2 decimal places
                 fps_str = f"{current_fps:.2f}"
@@ -540,7 +379,7 @@ def frame_handler(camera, frame):
                 pass  # Skip if queue is full
 
         # Process ROI updates based on detections (only occasionally)
-        if frame_count % YOLO_STRIDE == 0 and not UPDATING_BACKGROUND and frame_count % UPDATE_BACKGROUND_EVERY not in [5,4]:
+        if frame_count % YOLO_STRIDE == 0 and not UPDATING_BACKGROUND:
             ROI_counter += 1
 
             # Get detection results
@@ -553,66 +392,14 @@ def frame_handler(camera, frame):
                 last_update_time = detection_results['last_update_time']
 
             # Only update ROI if detection is recent (within 1 second)
-            if target_found and (time.time() - last_update_time) < 1.0:
-                # Update the Kalman filter with the current detection
-                tracker.update([x1, y1, x2, y2])
-                
-                # Get prediction for future position
-                if enable_predictive_roi and tracker.is_valid():
-                    # Make a deep copy of tracker for prediction
-                    future_tracker = tracker.copy()
-                    
-                    # Predict future position (multiple steps ahead)
-                    for _ in range(prediction_horizon):
-                        future_tracker.predict()
-                    
-                    future_pred = future_tracker.predict()
-                    if future_pred:
-                        future_x1, future_y1, future_x2, future_y2, vx, vy = future_pred
-                        
-                        # Only consider prediction if velocity is significant
-                        if abs(vx) > velocity_threshold or abs(vy) > velocity_threshold:
-                            # Calculate if the object will leave the ROI based on prediction
-                            will_leave_left = (future_x1 + delta_x1) < (x1_ROI + edge_proximity_yolo_margin)
-                            will_leave_right = (future_x2 + delta_x1) > (x1_ROI + x2_ROI_width - edge_proximity_yolo_margin)
-                            will_leave_top = (future_y1 + delta_y1) < (y1_ROI + edge_proximity_yolo_margin)
-                            will_leave_bottom = (future_y2 + delta_y1) > (y1_ROI + y2_ROI_height - edge_proximity_yolo_margin)
-                            
-                            # Object predicted to leave ROI soon
-                            predicted_to_leave = (will_leave_left or will_leave_right or 
-                                                will_leave_top or will_leave_bottom)
-                            
-                            # Force ROI update even if not near edge now, but predicted to leave soon
-                            if predicted_to_leave:
-                                near_edge = True
-                                print(f"Kalman predicted object leaving ROI. Updating ROI proactively.")
-                                
-                                # Adjust bounds to look ahead in the direction of motion
-                                if abs(vx) > velocity_threshold:  # If there's significant horizontal motion
-                                    # Add extra padding in the direction of motion
-                                    x_adjustment = vx * direction_weight * prediction_horizon
-                                    if vx > 0:  # Moving right
-                                        x2 = max(x2, x2 + x_adjustment)
-                                    else:  # Moving left
-                                        x1 = min(x1, x1 + x_adjustment)
-                                
-                                if abs(vy) > velocity_threshold:  # If there's significant vertical motion
-                                    # Add extra padding in the direction of motion
-                                    y_adjustment = vy * direction_weight * prediction_horizon
-                                    if vy > 0:  # Moving down
-                                        y2 = max(y2, y2 + y_adjustment)
-                                    else:  # Moving up
-                                        y1 = min(y1, y1 + y_adjustment)
-                
+            if target_found and (time.time() - last_update_time) > 0.2:
                 # Check if bbox is near ROI edges
                 near_left = abs(x1 + delta_x1 - x1_ROI) <= edge_proximity_yolo_margin
                 near_right = abs((x2 + delta_x1) - (x1_ROI + x2_ROI_width)) <= edge_proximity_yolo_margin
                 near_top = abs(y1 + delta_y1 - y1_ROI) <= edge_proximity_yolo_margin
                 near_bottom = abs(y2 + delta_y1 - (y1_ROI + y2_ROI_height)) <= edge_proximity_yolo_margin
                 
-                # Update near_edge if it's not already set by the prediction
-                if not near_edge:
-                    near_edge = (near_left or near_right or near_top or near_bottom)
+                near_edge = (near_left or near_right or near_top or near_bottom)
 
                 if near_edge or (
                         x1_ROI == 0 and y1_ROI == 0 and x2_ROI_width == cam_width and y2_ROI_height == cam_height):
@@ -622,8 +409,8 @@ def frame_handler(camera, frame):
                     y2_adj = y2 + delta_y1
 
                     # Update camera ROI parameters
-                    new_height = min(y2_adj - y1_adj + 2 * padding, cam_height - max(0, y1_adj - padding))
-                    new_width = min(x2_adj - x1_adj + 2 * padding, cam_width - max(0, x1_adj - padding))
+                    new_height = min(y2_adj - y1_adj + 2 * padding, cam_height - max(0, y1_adj - padding - 1))
+                    new_width = min(x2_adj - x1_adj + 2 * padding, cam_width - max(0, x1_adj - padding - 1))
                     new_offset_y = max(0, y1_adj - padding)
                     new_offset_x = max(0, x1_adj - padding)
 
@@ -647,9 +434,6 @@ def frame_handler(camera, frame):
 
                     near_edge = False
             elif not target_found and ROI_counter % CHANGE_ROI_THRESH == 0 and not roi_fixed:
-                # Let Kalman tracker predict even without a detection
-                tracker.predict()
-                
                 # Reset to full frame when target not found (only if roi_fixed is False)
                 try:
                     cam.get_feature_by_name("Height").set(cam_height)
@@ -673,16 +457,16 @@ with Vimba.get_instance() as vimba:
     with cams[0] as cam:
         # Configure camera
         try:
-            cam.get_feature_by_name("ExposureAuto").set("Once")
-            cam.get_feature_by_name("BalanceWhiteAuto").set("Once")
+            #cam.get_feature_by_name("ExposureAuto").set("Once")
+            cam.get_feature_by_name("BalanceWhiteAuto").set("Continuous")
             cam.get_feature_by_name("Height").set(cam_height)
             cam.get_feature_by_name("Width").set(cam_width)
             cam.get_feature_by_name("OffsetY").set(0)
             cam.get_feature_by_name("OffsetX").set(0)
 
             # Set fastest possible exposure
-            #cam.get_feature_by_name("ExposureTimeAbs").set(1000)  # 1ms exposure
-            #cam.get_feature_by_name("GainRaw").set(30)  # Compensate with gain
+            cam.get_feature_by_name("ExposureTimeAbs").set(4254)  # 1ms exposure
+            cam.get_feature_by_name("GainRaw").set(24)  # Compensate with gain
 
             # Try to optimize frame rate if supported
             try:

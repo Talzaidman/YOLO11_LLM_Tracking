@@ -1,0 +1,118 @@
+Text-Guided Real-Time Video Attention and ROI Detection
+
+This project implements a real-time, text-guided video attention system that integrates deep learning object detection (YOLOv8-World) with dynamic camera ROI (Region of Interest) control. The system enables efficient high-speed tracking by adjusting the camera’s ROI in real time, reducing computational load while maintaining accuracy. It also leverages an LLM-based interface to allow users to specify targets through natural language commands.
+
+📌 Features
+
+Text-guided object detection using YOLOv8-World.
+
+Dynamic ROI control to optimize processing speed and reduce aliasing.
+
+Full-frame resets to maintain spatial awareness and prevent peripheral blindness.
+
+Multi-threaded architecture for real-time performance (capture, detection, display, and saving run in parallel).
+
+Simulation setups (rotating fan, walking figure) used for debugging, performance testing, and validation.
+
+User-friendly commands for changing target classes on-the-fly.
+
+⚙️ Hardware Documentation
+
+Camera: Allied Vision Manta (configured via Vimba SDK).
+
+Resolution: 1388 × 1038 pixels, dynamically adjustable ROI.
+
+Workstation: Requires GPU acceleration (tested with NVIDIA GPUs).
+
+Other requirements: Sufficient CPU/RAM for multithreaded operation.
+
+💻 Software Documentation
+
+Language: Python 3.9+
+
+Main Dependencies:
+
+Ultralytics YOLOv8
+
+OpenCV
+
+NumPy
+
+Matplotlib
+
+Vimba SDK
+
+Core Modules:
+
+main.py – entry point, integrates all components.
+
+Ask_yolo.py – interface to YOLOv8-World model.
+
+text2command.py – converts natural language input into class labels.
+
+Cropped2center.py / Cropped2sameplace.py – ROI management helpers.
+
+🧪 Simulation and Testing
+
+Two main scenarios were used to validate the system:
+
+Rotating fan on white background – used to study FPS influence on aliasing. Demonstrated that low FPS causes aliasing, while dynamic ROI increased FPS (~60) and removed aliasing artifacts.
+
+Walking man video (on smartphone screen) – tested tracking and reacquisition across the frame. Demonstrated smooth ROI updates, target re-centering, and reliable reacquisition after target loss.
+
+Simulation outputs include:
+
+Performance logs (FPS and latency).
+
+Saved frames with annotations.
+
+Trend plots of FPS stability across time.
+
+📖 User Guide
+
+Clone the repository:
+
+git clone https://github.com/Talzaidman/YOLO11_LLM_Tracking.git
+cd YOLO11_LLM_Tracking
+
+
+Install dependencies:
+
+pip install -r requirements.txt
+
+
+Connect the camera (ensure Vimba SDK is installed and configured).
+
+Run the program:
+
+python main.py
+
+
+Controls:
+
+Enter text command to specify target class (e.g., "dog", "person").
+
+Press q to quit the program.
+
+Press j to fix ROI in a static position.
+
+Press p to re-enable automatic ROI updates.
+
+Outputs:
+
+Live display of tracking.
+
+Saved frames in saved_frames/ folder (with FPS information in filenames).
+
+FPS plots generated after program exit.
+
+📂 Repository Structure
+YOLO11_LLM_Tracking/
+│── main.py                 # Main entry point
+│── Ask_yolo.py             # YOLO interface
+│── text2command.py         # Natural language command processing
+│── Cropped2center.py       # ROI helper
+│── Cropped2sameplace.py    # ROI helper
+│── requirements.txt        # Dependencies
+│── saved_frames/           # Auto-generated saved frames
+│── docs/                   # Project report, poster, and simulations
